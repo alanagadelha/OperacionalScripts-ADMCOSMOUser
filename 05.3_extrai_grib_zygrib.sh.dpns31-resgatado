@@ -1,0 +1,239 @@
+#!/bin/bash -x
+
+#############################################
+#
+# Script para extracao de dados GRIB, visando
+# gerar arquivos do WRF para visualizao no GEMPAK.
+# o diretorio de origem dos dados sera o da
+# rodada operacional do WRF definido como
+# $DIRDADOSORI.
+#
+# Escrito em 21MAR2012
+#
+# Alterado em 12MAI2016
+#
+# Autor: 1T(T) Alexandre Gadelha
+#
+#############################################
+
+#############################################
+#
+# Verifica se foi passado o horario da rodada
+#
+#############################################
+
+if [ "$#" -ne 5 ];then
+     echo "Entre com a area (metarea5, antartica), o horario da rodada (00 ou 12), o horario inicial, o horario final e a regiao (drake e zoom) !"
+     exit 12
+fi
+
+AREA=$1
+area=`echo $AREA | tr [A-Z] [a-z]`                              # Transforma maiusculas em minusculas.
+HSIM=$2
+HSTART=$3
+HSTOP=$4
+NAREA=$5
+
+mpt=`cat $HOME/wrf/invariantes/mpt_versao | head -1`
+ulimit -s unlimited
+ulimit -v unlimited
+
+source /opt/intel/bin/compilervars.sh intel64
+. /usr/share/modules/init/bash
+module load mpt/${mpt}
+
+export PATH=$PATH:/home/wrfoperador/local/bin:/opt/opengrads:/home/gempak/GEMPAK6.10/os/linux64/bin:.
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/wrfoperador/local/lib
+export NETCDF=/home/wrfoperador/local
+export JASPERLIB=/home/wrfoperador/local/lib
+export JASPERINC=/home/wrfoperador/local/include
+export WRFIO_NCD_LARGE_FILE_SUPPORT=1
+export GEMEXEC=/home/gempak/GEMPAK6.10/os/linux64/bin
+
+#############################################
+#
+# DIRDADOSORI eh o diretorio de origem de onde
+# serao extraidos os dados do GRIB
+#
+# DIRDADOSEXT eh o diretorio de destino para
+# onde serao salvos os dados extraidos.
+#
+# HSTOP2 eh o periodo que sera extraido. O WRF
+# gera 120 horas e por isso HSTOP2=120.
+#
+#############################################
+
+curr_date=`cat ~/datas/datacorrente${HSIM}`
+wgrb_date=`cat ~/datas/extrdatacorr${HSIM}`${HSIM}
+
+if [ ${area} == "antartica" ] || [ ${area} == "antarticap" ];then
+#	raiz="/home/wrfoperador/pwrf"
+	raiz="/data1/wrf"
+else
+#	raiz="/home/wrfoperador/wrf"
+	raiz="/data1/wrf"
+fi
+
+wrf_out="wrfout_d0"                                             # modelo BASE do nome do dado de saida do WRF.
+dir_simulacao="${raiz}/wrf_${AREA}"
+dir_produtos="${dir_simulacao}/produtos"
+dir_gribs="${dir_produtos}/grib_${HSIM}"
+
+DIRDADOSORI=${dir_gribs}
+DIRDADOSEXT=${dir_produtos}/zygrib_${HSIM}
+DADOSORIPREF="wrf_${AREA}_${HSIM}_$curr_date"
+DADOSDESPREF="wrf_${AREA}_${HSIM}_$curr_date"
+DADOSDESGEMP="wrf_${HSIM}_${AREA}_${NAREA}_${curr_date}"
+
+DIG='0'
+
+for HREF2 in `seq ${HSTART} 3 ${HSTOP}`
+do
+
+   if [ $HREF2 -lt 10 ];then
+      HORA=0$DIG$HREF2
+   elif [ $HREF2 -lt 100 ];then
+      HORA=$DIG$HREF2
+   else
+      HORA=$HREF2
+   fi
+
+   str2="${str2} ${HORA}"
+
+done
+
+###################################################
+#
+# Remove arquivos antigos do diretorio de destino
+#
+###################################################
+
+cd ${DIRDADOSEXT}
+
+find . ! -name '*.bz2' -type f -exec rm -f {} +
+
+###################################################
+#
+# Entra no diretorio de origem e executa o WGRIB 
+# para todos os horarios dentro de $str2
+#
+###################################################
+
+cd ${DIRDADOSORI}
+
+case ${NAREA} in
+        drake)
+        parametros1="^1:|^275:|^276:|^20:|^279:"
+        parametros2="^1:|^275:|^276:|^20:"
+	lonlat="-90,-50,-75,-40"
+        ;;
+	zoom)
+        parametros1="^1:|^275:|^276:|^20:|^270:|^271:|^274:|^313:|^330:|kpds5=33:kpds6=100|kpds5=34:kpds6=100|kpds5=11:kpds6=100|kpds5=52:kpds6=100|^279:"
+        parametros2="^1:|^275:|^276:|^20:|^270:|^271:|^274:|^313:|^330:|kpds5=33:kpds6=100|kpds5=34:kpds6=100|kpds5=11:kpds6=100|kpds5=52:kpds6=100"
+        lonlat="-64,-54,-65,-60.5"
+        ;;
+esac
+
+for HORA in `echo ${str2}`
+do
+	
+###################################################
+#
+# Significado das linhas abaixo:
+#
+# ^1:   ou 1:0:d=${wgrb_date}:PRMSL:kpds5=2:kpds6=102:kpds7=0	Extrai pressao reduzida a superficie
+# ^330:   ou kpds5=7:kpds6=4					Extrai isolinha de 0 grau
+# ^271: ou kpds5=11:kpds6=105					Extrai a T2m (K)
+# ^273: ou kpds5=17:kpds6=105					Extrai a TD2m (K)
+# ^275: ou kpds5=33:kpds6=105					Extrai U_10M (m/s)
+# ^276: ou kpds5=34:kpds6=105					Extrai V_10M (m/s)
+# ^274: ou kpds5=52:kpds6=105					Extrai UR 2m (%)
+# ^313: ou kpds5=71						Extrai Cobertura Total de Nuvens
+# ^19:  ou kpds5=20:kpds6=1      				Extrai Visibilidade (m)
+# ^20:  ou kpds5=180:kpds6=1     				Extrai Rajadas (m/s)
+# kpds5=33:kpds6=100			  			Extrai comp U nos niveis ne pressao
+# kpds5=34:kpds6=100			  			Extrai comp V nos niveis de pressao
+# kpds5=11:kpds6=100			  			Extrai temperatura nos niveis de pressao
+# kpds5=17:kpds6=100						Extrai temp do ponto de orvalho nos niveis de pressao
+# kpds5=52:kpds6=100						Extrai a UR (%) nos niveis de pressao
+# ^267: ou kpds5=65:kpds6=1 (esta duplicado com 282) 		Extrai o conteudo de agua equivalente da profundidade de neve kg/m2
+# ^270: ou kpds5=66:kpds6=1					Extrai profundidade de neve (m)
+# ^285: ou kpds5=143:kpds6=1 (esta duplicado com 289)		Extrai Neve Categorica (0 ou 1)
+# ^287: ou kpds5=141:kpds6=1 (esta duplicado com 291)		Extrai Chuva congelada categorica (0 ou 1)
+# ^268: ou kpds5=79:kpds6=1					Extrai Neve de escala de grade
+# ^277: ou kpds5=214:kpds6=1					Extrai taxa de prec. convectiva ((kg/(m2 x s))
+# ^278: ou kpds5=59:kpds6=1					Extrai taxa de prec. ((kg/(m2 x s))
+# ^279: ou kpds5=61:kpds6=1					Extrai Prec. total kg/m2
+# ^280: ou kpds5=63:kpds6=1					Extrai Prec. Convectiva kg/m2
+# ^302: ou kpds5=157:kpds6=1 (esta duplicado com 338, 341, 343)	Extrai CAPE J/kg
+# ^310: ou kpds5=73:kpds6=214					Extrai Cobert. de nuvem baixa %
+# ^311: ou kpds5=74:kpds6=224					Extrai Cobert. de nuvem media %
+# ^313: ou kpds5=75:kpds6=234					Extrai Cobert. de nuvem alta  %
+# ^313: ou kpds5=71:kpds6=200					Extrai Cobert. total de nuvens %
+#
+###################################################
+
+echo " Extraindo os dados do horario ${HORA}"
+
+if [ ${HORA} -eq ${HSTART} ];then
+
+	comando=`echo "wgrib ${DADOSORIPREF}${HORA} | egrep \"(${parametros1})\" | wgrib -i -grib ${DADOSORIPREF}${HORA} -o ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_todas"`
+	eval $comando
+
+else
+
+	DIG=0
+	HORAANT=`echo "${HORA} - 3" | bc`
+
+	if [ ${HORAANT} -le 9 ];then
+
+		HORAANT=0${DIG}${HORAANT}
+
+	elif [ ${HORAANT} -ge 10 ] && [ ${HORAANT} -le 99 ];then
+
+		HORAANT=${DIG}${HORAANT}
+
+	else
+
+		HORAANT=${HORAANT}
+
+	fi
+
+	echo " Extrai a Precipitacao acumulada em 03h do horario ${HORA}."
+
+	comando=`echo "wgrib ${DADOSORIPREF}${HORA} | egrep \"(^279:)\" | wgrib -i -grib ${DADOSORIPREF}${HORA} -o ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_prec${HORA}"`
+        eval $comando
+
+	comando=`echo "wgrib ${DADOSORIPREF}${HORAANT} | egrep \"(^279:)\" | wgrib -i -grib ${DADOSORIPREF}${HORAANT} -o ${DIRDADOSEXT}/${DADOSDESPREF}${HORAANT}_prec${HORAANT}"`
+        eval $comando
+
+	/home/wrfoperador/local/bin/cdo sub ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_prec${HORA} ${DIRDADOSEXT}/${DADOSDESPREF}${HORAANT}_prec${HORAANT} ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_prec03h
+
+	echo " Extrai as demais variaveis."
+
+	comando=`echo "wgrib ${DADOSORIPREF}${HORA} | egrep \"(${parametros2})\" | wgrib -i -grib ${DADOSORIPREF}${HORA} -o ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_outras"`
+        eval $comando
+
+	echo " Uni o arquivo PREC com o arquivo das DEMAIS variaveis."
+
+	/home/wrfoperador/local/bin/cdo merge ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_outras ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_prec03h ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_todas
+
+fi
+
+#wgrib ${DADOSORIPREF}${HORA} | egrep "(kpds5=71:kpds6=200|kpds5=180:kpds6=1:kpds7=0|kpds5=52:kpds6=105:kpds7=2|kpds5=7:kpds6=4:kpds7=0|kpds5=156:kpds6=1:kpds7=0|1:0:d=${wgrb_date}:PRMSL:kpds5=2:kpds6=102:kpds7=0|kpds5=61:kpds6=1|kpds5=66:kpds6=1|285:|kpds5=11:kpds6=105:kpds7=2|kpds5=33:kpds6=105|kpds5=34:kpds6=105|287:)" \
+#wgrib ${DADOSORIPREF}${HORA} | egrep "(^19:)" \
+#| wgrib -i -grib ${DADOSORIPREF}${HORA} -o ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}
+
+/home/wrfoperador/local/bin/cdo -f grb sellonlatbox,${lonlat} ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_todas ${DIRDADOSEXT}/${DADOSDESPREF}${HORA}_cut
+
+done
+
+cd ${DIRDADOSEXT}
+
+echo
+echo " Executando o CDO."
+
+/home/wrfoperador/local/bin/cdo merge ${DIRDADOSEXT}/${DADOSDESPREF}*_cut ${DIRDADOSEXT}/${DADOSDESGEMP}
+#/home/wrfoperador/local/local2/bin/grib_set -s generatingProcessIdentifier=31 ${DIRDADOSEXT}/${DADOSDESGEMP} ${DIRDADOSEXT}/${DADOSDESPREF}_subcenter31
+/home/wrfoperador/local/local2/bin/grib_set -s generatingProcessIdentifier=31 ${DIRDADOSEXT}/${DADOSDESGEMP} ${DIRDADOSEXT}/${DADOSDESGEMP}_subcenter31
+/usr/bin/bzip2 -z ${DIRDADOSEXT}/${DADOSDESGEMP}_subcenter31

@@ -1,0 +1,9 @@
+#!/bin/bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/gast/libraries/zlib-1.2.8/lib:/opt/intel/composer_xe_2013/lib/intel64:/home/gast/libraries/openjpeg-1.5.1/lib:/home/gast/libraries/libpng-1.6.6/lib64:/home/gast/libraries/szip-2.1/lib64:/home/gast/libraries/curl-7.32.0/lib:/home/gast/libraries/hdf5-1.8.13/lib:/home/gast/libraries/netcdf/lib:/home/gast/libraries/GRIB_API/lib64:/home/gast/libraries/DWD-libgrib1_110128/lib:/opt/sgi/mpt/mpt-2.10/lib:/opt/intel/composer_xe_2013/lib/intel64:/lib64:/usr/local/netCDF/lib
+
+# MPT (2.10 SGI MPI):
+export PATH=/opt/sgi/mpt/mpt-2.10/bin:/opt/intel/composer_xe_2013/bin:/usr/local/netCDF/bin:${PATH}
+export grib_definition_path="/home/gast/libraries/GRIB_API/share-1.11.0/grib_api/definitions.edzw:/home/gast/libraries/GRIB_API/share-1.11.0/grib_api/definitions"
+
+
+/home/gast/libraries/GRIB_API/bin/grib_dump -t $1 2> /dev/null | grep dataDate | tail -1 | cut -f2 -d"=" | cut -c4-9
